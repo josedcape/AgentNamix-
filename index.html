@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AGENTNAMIX</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <!-- File Parsing Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- AlaSQL for Database -->
+    <script src="https://cdn.jsdelivr.net/npm/alasql@4.0.0/dist/alasql.min.js"></script>
+    <!-- HTML2PDF for Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script>
+      // Configure PDF.js worker
+      window.onload = function() {
+        if (window.pdfjsLib) {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+      };
+
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Space Grotesk', 'sans-serif'],
+              display: ['Orbitron', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
+            colors: {
+              gray: {
+                850: '#1f2937',
+                900: '#111827',
+                950: '#030712',
+              },
+              cyan: {
+                400: '#22d3ee',
+                500: '#06b6d4',
+                900: '#164e63',
+              },
+              violet: {
+                500: '#8b5cf6',
+                900: '#4c1d95',
+              }
+            },
+            animation: {
+              'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'fade-in-up': 'fadeInUp 0.5s ease-out forwards',
+            },
+            keyframes: {
+              fadeInUp: {
+                '0%': { opacity: '0', transform: 'translateY(10px)' },
+                '100%': { opacity: '1', transform: 'translateY(0)' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        background-color: #02040a;
+        color: #e5e7eb;
+        background-image: 
+          linear-gradient(rgba(6, 182, 212, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(6, 182, 212, 0.03) 1px, transparent 1px);
+        background-size: 30px 30px;
+        background-attachment: fixed;
+      }
+      
+      /* Glassmorphism Utilities */
+      .glass-panel {
+        background: rgba(17, 24, 39, 0.7);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      
+      .glass-card {
+        background: rgba(30, 41, 59, 0.4);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      /* Custom scrollbar */
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: rgba(0,0,0,0.3); 
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #1e293b; 
+        border-radius: 4px;
+        border: 1px solid #334155;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #334155; 
+        border-color: #22d3ee;
+      }
+
+      /* Enhanced Markdown / Canvas Styles */
+      .prose {
+        max-width: none;
+        color: #d1d5db;
+        font-size: 1.05rem; /* Larger text */
+      }
+      .prose h1, .prose h2, .prose h3 {
+        font-family: 'Orbitron', sans-serif;
+        color: #fff;
+        letter-spacing: 0.02em;
+        margin-top: 1.5em;
+        margin-bottom: 0.8em;
+      }
+      .prose h1 {
+        font-size: 1.8rem;
+        background: linear-gradient(to right, #22d3ee, #8b5cf6);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        border-bottom: 2px solid rgba(34, 211, 238, 0.2);
+        padding-bottom: 0.5rem;
+      }
+      .prose h2 {
+        font-size: 1.5rem;
+        color: #22d3ee;
+        border-left: 4px solid #06b6d4;
+        padding-left: 1rem;
+      }
+      .prose h3 {
+        font-size: 1.25rem;
+        color: #a78bfa;
+      }
+      .prose strong {
+        color: #fff;
+        font-weight: 700;
+        text-shadow: 0 0 10px rgba(255,255,255,0.2);
+      }
+      .prose p {
+        margin-bottom: 1.2em;
+        line-height: 1.75;
+      }
+      .prose ul {
+        list-style: none;
+        padding-left: 0;
+      }
+      .prose ul li {
+        padding-left: 1.5rem;
+        position: relative;
+        margin-bottom: 0.5rem;
+      }
+      .prose ul li::before {
+        content: "▹";
+        position: absolute;
+        left: 0;
+        color: #22d3ee;
+        font-weight: bold;
+      }
+      .prose blockquote {
+        border-left: 4px solid #8b5cf6;
+        background: rgba(139, 92, 246, 0.1);
+        padding: 1rem;
+        font-style: italic;
+        border-radius: 0 8px 8px 0;
+        color: #e5e7eb;
+      }
+      .prose a {
+        color: #38bdf8;
+        text-decoration: none;
+        border-bottom: 1px dotted #38bdf8;
+        transition: all 0.2s;
+      }
+      .prose a:hover {
+        color: #22d3ee;
+        border-bottom-style: solid;
+        text-shadow: 0 0 8px rgba(34, 211, 238, 0.6);
+      }
+      .prose code {
+        background: #111827;
+        color: #f472b6;
+        padding: 0.2rem 0.4rem;
+        border-radius: 4px;
+        font-family: 'JetBrains Mono', monospace;
+        border: 1px solid #374151;
+      }
+      .prose pre {
+        background: #0b0f19;
+        border: 1px solid #1f2937;
+        box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+      }
+      
+      /* Image / Capture Styles */
+      .prose img {
+        border-radius: 12px;
+        border: 1px solid rgba(6, 182, 212, 0.3);
+        box-shadow: 0 0 15px rgba(6, 182, 212, 0.15);
+        margin: 1.5rem 0;
+        max-width: 100%;
+        height: auto;
+        transition: transform 0.3s ease;
+      }
+      .prose img:hover {
+        transform: scale(1.01);
+        border-color: rgba(6, 182, 212, 0.6);
+      }
+      .prose figure {
+        margin: 0;
+      }
+      
+      /* Table Styles for data */
+      .prose table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1.5rem 0;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .prose th {
+        background: rgba(6, 182, 212, 0.15);
+        color: #22d3ee;
+        font-weight: 700;
+        text-align: left;
+        padding: 1rem;
+        border-bottom: 1px solid rgba(6, 182, 212, 0.3);
+      }
+      .prose td {
+        padding: 1rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      /* --- AGENT TITLE LASER EFFECTS --- */
+      
+      @keyframes neonPulseText {
+        0%, 100% { 
+            text-shadow: 0 0 10px rgba(34,211,238,0.3), 0 0 20px rgba(139,92,246,0.2);
+        }
+        50% { 
+            text-shadow: 0 0 15px rgba(34,211,238,0.7), 0 0 30px rgba(34,211,238,0.5), 0 0 45px rgba(139,92,246,0.5);
+        }
+      }
+
+      @keyframes laserSweep {
+        0%, 80% { 
+            background-position: -250% 0; 
+            opacity: 0;
+        } 
+        85% {
+            opacity: 1;
+        }
+        100% { 
+            background-position: 250% 0; 
+            opacity: 0;
+        }
+      }
+
+      .agent-title-laser {
+        position: relative;
+        /* Base Gradient Text */
+        color: transparent;
+        background: linear-gradient(90deg, #22d3ee, #c084fc, #22d3ee);
+        background-size: 200% auto;
+        -webkit-background-clip: text;
+        animation: neonPulseText 3s ease-in-out infinite alternate;
+      }
+
+      .agent-title-laser::after {
+        /* The Laser Beam Overlay */
+        content: attr(data-text);
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 10;
+        
+        /* The Laser Gradient (Transparent -> Bright White -> Transparent) */
+        background: linear-gradient(110deg, transparent 40%, rgba(255, 255, 255, 1) 50%, transparent 60%);
+        background-size: 200% 100%;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        
+        /* Scan every 10 seconds */
+        animation: laserSweep 10s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        
+        /* Brightness boost */
+        filter: drop-shadow(0 0 8px rgba(255,255,255,0.9));
+        pointer-events: none;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "marked": "https://esm.sh/marked@11.1.1",
+    "three": "https://esm.sh/three@0.160.0",
+    "three/examples/jsm/controls/OrbitControls.js": "https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js",
+    "three/examples/jsm/loaders/GLTFLoader.js": "https://esm.sh/three@0.160.0/examples/jsm/loaders/GLTFLoader.js",
+    "three/examples/jsm/exporters/GLTFExporter.js": "https://esm.sh/three@0.160.0/examples/jsm/exporters/GLTFExporter.js",
+    "three/": "https://aistudiocdn.com/three@^0.181.2/"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

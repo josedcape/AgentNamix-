@@ -1,0 +1,7 @@
+{
+  "name": "AGENTNAMIX🤖✅",
+  "description": "An autonomous AI agent powered by Gemini 2.5. Give it a goal, and it will plan, execute, and reason through tasks to achieve it.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
