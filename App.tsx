@@ -1,14 +1,15 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AgentControl } from './components/AgentControl';
 import { TaskBoard } from './components/TaskBoard';
 import { LogTerminal } from './components/LogTerminal';
 import { HelpSystem } from './components/HelpSystem';
+import { CodeEditor } from './components/CodeEditor';
 import { Modeler3D } from './components/Modeler3D';
 import { Task, LogEntry, AgentStatus, AgentConfiguration } from './types';
 import { createPlan, executeTask } from './services/gemini';
+import { ProcessedDocument } from './services/fileProcessor';
+import { ProjectStructure } from './services/architect';
 
-// Sonido de inicio (Futuristic Interface Start)
 const STARTUP_SOUND_URL = "https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3";
 
 const App: React.FC = () => {
@@ -20,9 +21,12 @@ const App: React.FC = () => {
     name: 'AutoAgent',
     description: '',
     tools: [],
-    model: 'gemini-2.5-flash', // Default model
+    model: 'gemini-2.5-flash',
     documents: []
   });
+
+  const [projectStructure, setProjectStructure] = useState<ProjectStructure | null>(null);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [isModelerOpen, setIsModelerOpen] = useState(false);
   
   const statusRef = useRef<AgentStatus>(AgentStatus.IDLE);
@@ -49,88 +53,100 @@ const App: React.FC = () => {
   const playStartupSound = () => {
     try {
       const audio = new Audio(STARTUP_SOUND_URL);
-      audio.volume = 0.4; // Volumen moderado
-      audio.play().catch(err => console.warn("No se pudo reproducir audio (interacción requerida):", err));
+      audio.volume = 0.4;
+      audio.play().catch(err => console.warn(err));
     } catch (e) {
-      console.error("Error inicializando audio", e);
+      console.error(e);
     }
   };
 
   const handleStart = async (newGoal: string, config: AgentConfiguration) => {
-    playStartupSound(); // Trigger sound effect
-    
+    playStartupSound();
     setGoal(newGoal);
     setAgentConfig(config);
     setTasks([]);
     setLogs([]);
+    setProjectStructure(null);
     setStatus(AgentStatus.PLANNING);
-    
-    addLog(`Sistema Inicializado. Identidad del Agente: "${config.name}"`, 'system');
-    addLog(`Objetivo: "${newGoal}"`, 'system');
-    addLog(`Motor de IA Seleccionado: ${config.model}`, 'system');
-    
-    if (config.documents && config.documents.length > 0) {
-      addLog(`Base de Conocimiento: ${config.documents.length} archivos cargados`, 'system');
-    }
-
-    if (config.tools.length > 0) {
-      addLog(`Módulos Cargados: ${config.tools.join(', ')}`, 'system');
-    }
+    addLog(`Sistema Inicializado: "${config.name}"`, 'system');
     
     try {
       addLog("Construyendo Plan Táctico...", 'ai');
       const planSteps = await createPlan(newGoal, config);
-      
-      if (planSteps.length === 0) {
-        throw new Error("La IA no pudo generar un plan.");
-      }
-
       const newTasks: Task[] = planSteps.map((step, index) => ({
         id: `task-${index}`,
         description: step,
         status: 'pending'
       }));
-
       setTasks(newTasks);
-      addLog(`Plan Autorizado: ${newTasks.length} fases en cola.`, 'success');
+      addLog(`Plan Autorizado: ${newTasks.length} fases.`, 'success');
       setStatus(AgentStatus.EXECUTING);
     } catch (error: any) {
-      addLog(`Fallo Crítico de Planificación: ${error.message || 'Error desconocido'}`, 'error');
+      addLog(`Fallo Crítico: ${error.message}`, 'error');
       setStatus(AgentStatus.ERROR);
     }
   };
 
-  const handleStop = () => {
-    setStatus(AgentStatus.IDLE);
-    addLog("Secuencia Abortada por el Usuario.", 'system');
+  const handleStop = () => { setStatus(AgentStatus.IDLE); addLog("Secuencia Abortada.", 'system'); };
+  const handleReset = () => { setStatus(AgentStatus.IDLE); setTasks([]); setLogs([]); setGoal(''); setProjectStructure(null); };
+
+  const handleAddDocument = (doc: ProcessedDocument) => {
+      setAgentConfig(prev => ({
+          ...prev,
+          documents: [...(prev.documents || []), { name: doc.name, content: doc.content }]
+      }));
+      addLog(`Archivo "${doc.name}" agregado.`, 'success');
   };
 
-  const handleReset = () => {
-    setStatus(AgentStatus.IDLE);
-    setTasks([]);
-    setLogs([]);
-    setGoal('');
+  const handleEditorAIRequest = async (instruction: string, currentFile?: string) => {
+      const newTask: Task = {
+          id: `edit-${Date.now()}`,
+          description: `SOLICITUD EDITOR: ${instruction} ${currentFile ? `en ${currentFile}` : ''}.`,
+          status: 'pending'
+      };
+      setTasks(prev => {
+          const newQueue = [...prev];
+          const activeIndex = prev.findIndex(t => t.status === 'processing');
+          newQueue.splice(activeIndex + 1, 0, newTask);
+          return newQueue;
+      });
+      if (status === AgentStatus.IDLE) setStatus(AgentStatus.EXECUTING);
+      addLog(`Solicitud Editor: "${instruction}"`, 'ai');
+  };
+
+  // --- NEW HANDLER FOR FOLLOW UP QUESTIONS ---
+  const handleFollowUp = (input: string) => {
+      const newTask: Task = {
+          id: `followup-${Date.now()}`,
+          description: input, // The user question becomes the task description
+          status: 'pending'
+      };
+      
+      setTasks(prev => [...prev, newTask]);
+      
+      // If the agent was finished or idle, restart execution to process the new task
+      if (status === AgentStatus.IDLE || status === AgentStatus.FINISHED) {
+          setStatus(AgentStatus.EXECUTING);
+      }
+      
+      addLog(`Nueva Directiva de Seguimiento: "${input}"`, 'system');
   };
 
   useEffect(() => {
     const executeNextStep = async () => {
       if (statusRef.current !== AgentStatus.EXECUTING) return;
-
       const currentTasks = tasksRef.current;
       const nextTaskIndex = currentTasks.findIndex(t => t.status === 'pending');
 
       if (nextTaskIndex === -1) {
         setStatus(AgentStatus.FINISHED);
-        addLog("Misión Cumplida. Todas las tareas verificadas.", 'success');
+        addLog("Misión Cumplida.", 'success');
         return;
       }
 
       const taskToRun = currentTasks[nextTaskIndex];
-
-      setTasks(prev => prev.map(t => 
-        t.id === taskToRun.id ? { ...t, status: 'processing' } : t
-      ));
-      addLog(`Ejecutando Fase ${nextTaskIndex + 1}: ${taskToRun.description}`, 'info');
+      setTasks(prev => prev.map(t => t.id === taskToRun.id ? { ...t, status: 'processing' } : t));
+      addLog(`Ejecutando: ${taskToRun.description}`, 'info');
 
       try {
         const context = currentTasks
@@ -138,43 +154,34 @@ const App: React.FC = () => {
           .map(t => `Tarea: ${t.description}\nResultado: ${t.result}`)
           .join('\n\n');
 
-        // Pass the callback to visualize browser actions
+        const projectContext = agentConfigRef.current.tools.includes('software_architect') && projectStructure
+            ? `\n\n[PROYECTO ACTUAL]: ${projectStructure.files.map(f => f.path).join(', ')}` : "";
+
         const result = await executeTask(
             taskToRun, 
-            context, 
+            context + projectContext, 
             goalRef.current, 
             agentConfigRef.current,
-            (action) => {
-                // When agent signals an action, update UI state for the overlay
-                setActiveBrowserAction(action);
-                // Clear the overlay after a delay to simulate action completion visually
-                setTimeout(() => setActiveBrowserAction(null), 3000);
+            (action) => { setActiveBrowserAction(action); setTimeout(() => setActiveBrowserAction(null), 3000); },
+            (newProject) => {
+                setProjectStructure(newProject);
+                if (!isEditorOpen) setIsEditorOpen(true); 
+                addLog(`Proyecto Actualizado.`, 'success');
             }
         );
 
-        setTasks(prev => prev.map(t => 
-          t.id === taskToRun.id ? { ...t, status: 'completed', result } : t
-        ));
-        addLog(`Fase ${nextTaskIndex + 1} Completa.`, 'success');
-        
-        setTimeout(() => {}, 1000);
-
+        setTasks(prev => prev.map(t => t.id === taskToRun.id ? { ...t, status: 'completed', result } : t));
+        addLog(`Fase Completa.`, 'success');
       } catch (error: any) {
-        console.error(error);
-        setTasks(prev => prev.map(t => 
-          t.id === taskToRun.id ? { ...t, status: 'failed', result: error.message } : t
-        ));
-        addLog(`Fallo de Fase: ${error.message}`, 'error');
+        setTasks(prev => prev.map(t => t.id === taskToRun.id ? { ...t, status: 'failed', result: error.message } : t));
+        addLog(`Fallo: ${error.message}`, 'error');
         setStatus(AgentStatus.ERROR); 
       }
     };
 
-    if (status === AgentStatus.EXECUTING) {
-      executeNextStep();
-    }
-  }, [status, tasks]);
+    if (status === AgentStatus.EXECUTING) executeNextStep();
+  }, [status, tasks, projectStructure, isEditorOpen]);
 
-  // Translate Status for Display
   const getStatusLabel = (s: AgentStatus) => {
     switch(s) {
       case AgentStatus.IDLE: return 'INACTIVO';
@@ -188,36 +195,20 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen text-gray-100 p-4 md:p-6 font-sans overflow-hidden">
-      {/* Background Glows */}
       <div className="fixed top-0 left-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-[100px] pointer-events-none" />
       <div className="fixed bottom-0 right-1/4 w-96 h-96 bg-violet-600/10 rounded-full blur-[100px] pointer-events-none" />
 
-      {/* Help System Overlay */}
+      {/* OVERLAYS */}
       <HelpSystem />
-      
-      {/* 3D Modeler Modal */}
+      <CodeEditor isOpen={isEditorOpen} onClose={() => setIsEditorOpen(false)} project={projectStructure} onAIRequest={handleEditorAIRequest} />
       <Modeler3D isOpen={isModelerOpen} onClose={() => setIsModelerOpen(false)} />
-
-      {/* Floating 3D Modeler Button (NEW) */}
-      {agentConfig.tools.includes('model_3d') && (
-          <button 
-            onClick={() => setIsModelerOpen(true)}
-            className="fixed bottom-24 right-6 w-14 h-14 bg-gradient-to-br from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-full shadow-[0_0_20px_rgba(192,132,252,0.5)] flex items-center justify-center text-white z-50 transition-all hover:scale-110 border border-purple-400 group"
-            title="Abrir Estudio 3D"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
-            </svg>
-            <span className="absolute right-16 bg-purple-900 text-purple-100 text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap border border-purple-700 font-bold">
-                MODELO 3D
-            </span>
-          </button>
-      )}
 
       <div className="max-w-[1600px] mx-auto h-[calc(100vh-3rem)] flex flex-col relative z-10">
         
         {/* Header */}
-        <header className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 glass-panel p-4 rounded-xl border-t border-cyan-500/30">
+        <header className="mb-6 flex flex-col xl:flex-row xl:items-center justify-between gap-4 glass-panel p-4 rounded-xl border-t border-cyan-500/30">
+          
+          {/* LOGO */}
           <div className="flex items-center gap-4">
             <div className="relative">
               <div className="w-12 h-12 bg-gray-900 rounded-lg flex items-center justify-center border border-cyan-500/50 shadow-[0_0_15px_rgba(6,182,212,0.3)]">
@@ -239,12 +230,36 @@ const App: React.FC = () => {
                      </span>
                   </div>
               </div>
-              <p className="text-cyan-200/60 text-xs uppercase tracking-[0.2em] font-mono mt-1">Unidad de Inteligencia Autónoma</p>
+              <p className="text-cyan-200/60 text-xs uppercase tracking-[0.2em] font-mono mt-1">Agentes Especializados con Inteligencia Autónoma</p>
             </div>
           </div>
           
-          <div className="flex items-center gap-4">
-             <div className="flex flex-col items-end">
+          {/* TOOLBAR & STATUS */}
+          <div className="flex flex-wrap items-center gap-4 justify-end">
+             
+             {/* Studio Tools Buttons */}
+             <div className="flex bg-gray-900/50 rounded-lg p-1 border border-gray-700/50">
+                <button 
+                    onClick={() => setIsEditorOpen(true)}
+                    className="flex items-center gap-2 px-4 py-2 rounded text-xs font-bold uppercase tracking-wider text-gray-300 hover:bg-gray-800 hover:text-white transition-colors border-r border-gray-700/50 pr-4 mr-1"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                    </svg>
+                    Editor IDE
+                </button>
+                <button 
+                    onClick={() => setIsModelerOpen(true)}
+                    className="flex items-center gap-2 px-4 py-2 rounded text-xs font-bold uppercase tracking-wider text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
+                    </svg>
+                    Estudio 3D
+                </button>
+             </div>
+
+             <div className="flex flex-col items-end pl-4 border-l border-gray-700/50">
                <span className="text-[10px] text-gray-500 uppercase tracking-wider font-mono">Estado del Sistema</span>
                <div className={`px-4 py-1 rounded-sm text-xs font-mono font-bold border-l-2 uppercase tracking-widest transition-all duration-300 ${
                  status === AgentStatus.IDLE ? 'border-gray-500 text-gray-400 bg-gray-800/50' :
@@ -259,7 +274,6 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-0">
           
           {/* Left Column: Control Deck */}
@@ -283,6 +297,8 @@ const App: React.FC = () => {
                 activeBrowserAction={activeBrowserAction}
                 agentConfig={agentConfig}
                 goal={goal}
+                onAddDocument={handleAddDocument}
+                onFollowUp={handleFollowUp}
             />
           </div>
         </div>

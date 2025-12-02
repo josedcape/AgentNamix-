@@ -3,6 +3,8 @@ import { Task, AgentConfiguration } from '../types';
 import { marked } from 'marked';
 import { speakText, stopSpeaking } from '../services/speech';
 import { generateMissionReport } from '../services/report';
+import { db } from '../services/db';
+import { processFile, ProcessedDocument } from '../services/fileProcessor';
 
 // --- INTERNAL COMPONENT: Browser Visualizer ---
 interface BrowserOverlayProps {
@@ -77,12 +79,18 @@ interface TaskBoardProps {
   activeBrowserAction?: { action: string, target?: string, value?: string };
   agentConfig?: AgentConfiguration;
   goal?: string;
+  onAddDocument?: (doc: ProcessedDocument) => void;
+  onFollowUp?: (input: string) => void;
 }
 
-export const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, activeBrowserAction, agentConfig, goal }) => {
+export const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, activeBrowserAction, agentConfig, goal, onAddDocument, onFollowUp }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [savedMemoryId, setSavedMemoryId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [followUpInput, setFollowUpInput] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-scroll to bottom when new tasks/results appear
   useEffect(() => {
@@ -100,11 +108,43 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, activeBrowserAction
       setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const handleSaveToMemory = (text: string, taskId: string) => {
+      // Create a summary for the memory
+      const snippet = text.slice(0, 500) + (text.length > 500 ? "..." : "");
+      db.addMemory(snippet, 'summary', 'high');
+      
+      setSavedMemoryId(taskId);
+      setTimeout(() => setSavedMemoryId(null), 2000);
+  };
+
   const handleExportPDF = async () => {
       if (!agentConfig || !goal) return;
       setIsExporting(true);
       await generateMissionReport(tasks, agentConfig, goal);
       setIsExporting(false);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files.length > 0 && onAddDocument) {
+          setIsUploading(true);
+          const file = e.target.files[0];
+          try {
+              const doc = await processFile(file);
+              onAddDocument(doc);
+          } catch (error) {
+              console.error("Error al cargar documento:", error);
+              alert("Error al procesar el archivo. Verifique el formato.");
+          }
+          setIsUploading(false);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+  };
+
+  const handleSendFollowUp = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!followUpInput.trim() || !onFollowUp) return;
+      onFollowUp(followUpInput);
+      setFollowUpInput('');
   };
 
   const hasCompletedTasks = tasks.some(t => t.status === 'completed' && t.result);
@@ -129,25 +169,49 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, activeBrowserAction
             {tasks.filter(t => t.status === 'completed').length} / {tasks.length} FASES COMPLETADAS
             </div>
             
-            {hasCompletedTasks && (
+            <div className="flex items-center gap-2">
+                {/* INJECT DATA BUTTON */}
+                <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    onChange={handleFileUpload} 
+                    className="hidden" 
+                    accept=".pdf,.docx,.txt,.xlsx,.xls" 
+                />
                 <button 
-                    onClick={handleExportPDF} 
-                    disabled={isExporting}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded border border-gray-600 transition-colors"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-400 text-xs rounded border border-cyan-700/50 transition-colors"
+                    title="Cargar documento al contexto"
                 >
-                    {isExporting ? (
-                         <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    {isUploading ? (
+                        <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                     ) : (
-                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
                     )}
-                    EXPORTAR PDF
+                    CARGAR DATOS
                 </button>
-            )}
+
+                {hasCompletedTasks && (
+                    <button 
+                        onClick={handleExportPDF} 
+                        disabled={isExporting}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded border border-gray-600 transition-colors"
+                    >
+                        {isExporting ? (
+                            <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        )}
+                        EXPORTAR PDF
+                    </button>
+                )}
+            </div>
         </div>
       </div>
       
       {/* Scrollable Canvas Area */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 bg-black/20">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 bg-black/20 pb-20">
         {tasks.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-600 opacity-50">
             <div className="w-24 h-24 border border-dashed border-gray-700 rounded-full flex items-center justify-center mb-4">
@@ -221,6 +285,25 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, activeBrowserAction
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
                                     </svg>
                                 </button>
+
+                                {/* Memory Button (Only if Memory tool is active) */}
+                                {agentConfig?.tools.includes('memory_system') && (
+                                    <button 
+                                        onClick={() => handleSaveToMemory(task.result!, task.id)}
+                                        className="text-gray-500 hover:text-purple-400 transition-colors p-1.5 rounded hover:bg-gray-800"
+                                        title="Guardar como Recuerdo Importante (Memoria LP)"
+                                    >
+                                        {savedMemoryId === task.id ? (
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                            </svg>
+                                        ) : (
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                            </svg>
+                                        )}
+                                    </button>
+                                )}
                             </div>
                         )}
                      </div>
@@ -249,6 +332,33 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, activeBrowserAction
                 )}
               </div>
             ))}
+
+            {/* --- FOLLOW UP INPUT SECTION --- */}
+            {tasks.length > 0 && onFollowUp && (
+                <div className="ml-6 md:ml-16 mt-8 animate-fade-in-up">
+                    <form onSubmit={handleSendFollowUp} className="relative group">
+                        <div className="absolute -inset-0.5 bg-gradient-to-r from-cyan-500 to-violet-600 rounded-lg blur opacity-20 group-hover:opacity-40 transition duration-1000"></div>
+                        <div className="relative bg-black border border-gray-800 rounded-lg flex items-center p-2 shadow-xl">
+                            <input 
+                                type="text" 
+                                value={followUpInput}
+                                onChange={(e) => setFollowUpInput(e.target.value)}
+                                placeholder="Escribe para continuar la misión o hacer una pregunta de seguimiento..."
+                                className="flex-1 bg-transparent text-white px-4 py-3 focus:outline-none text-sm placeholder-gray-600"
+                            />
+                            <button 
+                                type="submit" 
+                                disabled={!followUpInput.trim()}
+                                className="bg-cyan-600 hover:bg-cyan-500 text-white p-3 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clipRule="evenodd" />
+                                </svg>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
           </div>
         )}
       </div>
